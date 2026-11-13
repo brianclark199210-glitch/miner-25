@@ -127,6 +127,56 @@ function renderOperators(ops) {
   el.innerHTML = parts.join("");
 }
 
+function fmtUnix(seconds) {
+  if (!seconds) return "—";
+  const date = new Date(Number(seconds) * 1000);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
+}
+
+function renderWallet(wallet) {
+  const el = document.getElementById("wallet");
+  const note = document.getElementById("wallet-note");
+  const message = document.getElementById("wallet-message");
+  const accepted = (wallet && wallet.accepted) || null;
+  const challenge = (wallet && wallet.challenge) || {};
+  const parts = [
+    row("Coldkey", `<code>${escapeHtml((wallet && wallet.coldkey_ss58) || "—")}</code>`),
+  ];
+  if (accepted) {
+    const state = accepted.acknowledged ? badge("accepted", "ok") : badge("pending", "warn");
+    parts.push(row("Consent", state));
+    parts.push(row("Generation", escapeHtml(accepted.generation ?? "—")));
+    parts.push(row("Earning epochs", escapeHtml(`${accepted.from_epoch ?? "—"} through ${accepted.through_epoch ?? "—"}`)));
+    parts.push(row("Matches .env", accepted.matches_env ? badge("yes", "ok") : badge("no", "warn")));
+  } else {
+    parts.push(row("Consent", badge("none on file", "neutral")));
+  }
+  if (challenge.present) {
+    parts.push(row("Saved challenge", challenge.expired ? badge("expired", "bad") : badge("open", "ok")));
+    parts.push(row("Challenge epochs", escapeHtml(`${challenge.from_epoch ?? "—"} through ${challenge.through_epoch ?? "—"}`)));
+    parts.push(row("Boundary epoch", escapeHtml(challenge.boundary_epoch ?? "—")));
+    parts.push(row("Issued", escapeHtml(fmtUnix(challenge.issued_at))));
+    parts.push(row("Expires", escapeHtml(fmtUnix(challenge.expires_at))));
+    message.hidden = false;
+    message.textContent = challenge.message || "";
+  } else {
+    parts.push(row("Saved challenge", badge("missing", "neutral")));
+    message.hidden = true;
+    message.textContent = "";
+  }
+  el.innerHTML = parts.join("");
+  if (accepted && accepted.acknowledged && challenge.expired) {
+    note.textContent = "This coldkey is already confirmed for the epochs above. The saved challenge has expired, so it cannot be submitted again.";
+  } else if (challenge.present && !challenge.expired) {
+    note.textContent = "Sign this exact message with the coldkey and submit it within five minutes of issue.";
+  } else if (!challenge.present) {
+    note.textContent = "No wallet challenge file is on disk. Run provider wallet challenge to print a new one.";
+  } else {
+    note.textContent = "The payout-wallet statement to sign, and the consent already on file.";
+  }
+}
+
 function renderSecrets(sec) {
   const el = document.getElementById("secrets");
   const bit = (ok) => (ok ? badge("present", "ok") : badge("missing", "neutral"));
@@ -194,6 +244,7 @@ async function refresh() {
     renderPm2(data.pm2 || []);
     renderOperators(data.operators || {});
     renderSecrets(data.secrets || {});
+    renderWallet(data.wallet || {});
     renderRepo(data.project || []);
     renderCmds(data.commands || []);
     renderDiagrams(data.diagrams || []);

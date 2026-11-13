@@ -23,7 +23,7 @@
 #   PM2_NAME          default: sn25-miner
 #   PM2_NAME_ALL      default: sn25-miner-all
 #   SN25_TAKEOVER=1   stop installer/other owners before a fresh PM2 start
-#   DASHBOARD_HOST    default: 127.0.0.1
+#   DASHBOARD_HOST    default: 0.0.0.0 (reachable on this host's public IP)
 #   DASHBOARD_PORT    default: 8787
 set -euo pipefail
 
@@ -43,7 +43,7 @@ PM2_NAME="${PM2_NAME:-sn25-miner}"
 PM2_NAME_ALL="${PM2_NAME_ALL:-sn25-miner-all}"
 SN25_TAKEOVER="${SN25_TAKEOVER:-1}"
 PM2_HOME_DIR="${PM2_HOME:-$HOME/.pm2}"
-DASHBOARD_HOST="${DASHBOARD_HOST:-127.0.0.1}"
+DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8787}"
 
 log()  { printf '%s [run.sh] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -92,7 +92,7 @@ provider() {
 # --- running-state detection -------------------------------------------------
 
 status_file_alive() {
-  local status="${URNETWORK_STATE_DIR:-$HOME/.urnetwork}/miner-status.json"
+  local status="${1:-${URNETWORK_STATE_DIR:-$HOME/.urnetwork}/miner-status.json}"
   [[ -f "$status" ]] || return 1
   python3 - "$status" <<'PY' 2>/dev/null
 import json, os, sys
@@ -163,12 +163,53 @@ miner_already_running() {
   return 1
 }
 
+# provide --all-operators writes each operator's miner-status.json under
+# operators/<domain>, not at the top of the state directory. provider status
+# with no override reads the top, which still describes the installer after
+# that service has stopped.
+live_operator_state_dirs() {
+  local base="${URNETWORK_STATE_DIR:-$HOME/.urnetwork}/operators" dir nullglob_was=0
+  [[ -d "$base" ]] || return 0
+  shopt -q nullglob && nullglob_was=1
+  shopt -s nullglob
+  for dir in "$base"/*/; do
+    if status_file_alive "${dir}miner-status.json"; then
+      printf '%s\n' "${dir%/}"
+    fi
+  done
+  [[ "$nullglob_was" == 1 ]] || shopt -u nullglob
+}
+
+# Status for the process that is actually mining. The all-operators PM2 app
+# is one supervisor plus a provider per operator; the installer's status file
+# is a different process and must not be reported as that app.
+show_status() {
+  if pm2_online "$PM2_NAME_ALL"; then
+    local dir found=0 code=0
+    while IFS= read -r dir; do
+      [[ -n "$dir" ]] || continue
+      found=1
+      log "operator $(basename "$dir")"
+      URNETWORK_STATE_DIR="$dir" provider status "$@" || code=$?
+    done < <(live_operator_state_dirs)
+    if [[ "$found" == 0 ]]; then
+      err "$PM2_NAME_ALL is online in pm2, but no operator miner is up"
+      return 1
+    fi
+    return "$code"
+  fi
+  provider status "$@"
+}
+
 show_running() {
   log "miner already running — leaving it alone (double-start is a no-op)"
-  if pm2_online "$PM2_NAME" || pm2_online "$PM2_NAME_ALL"; then
-    pm2 list | grep -E "id|sn25-miner|─|│" || pm2 list
+  if pm2_online "$PM2_NAME"; then
+    pm2 describe "$PM2_NAME" | head -20 || true
   fi
-  provider status 2>/dev/null || true
+  if pm2_online "$PM2_NAME_ALL"; then
+    pm2 describe "$PM2_NAME_ALL" | head -20 || true
+  fi
+  show_status || true
 }
 
 # --- stop helpers ------------------------------------------------------------
@@ -438,8 +479,9 @@ cmd_dashboard() {
         cat <<EOF
 Usage: ./run.sh dashboard [--host HOST] [--port PORT]
 
-Local HTTP dashboard for miner health and how SN25 fits together.
+HTTP dashboard for miner health and how SN25 fits together.
 Default: http://${DASHBOARD_HOST}:${DASHBOARD_PORT}/
+0.0.0.0 listens on every interface, so the host's public IP works.
 EOF
         return 0
         ;;
@@ -495,7 +537,7 @@ main() {
     stop)                  cmd_stop ;;
     restart)               cmd_restart "$@" ;;
     logs|log)              cmd_logs "$@" ;;
-    status)                provider status "$@" ;;
+    status)                show_status "$@" ;;
     doctor)                provider doctor "$@" ;;
     dashboard|ui|web)      cmd_dashboard "$@" ;;
     setup)                 provider setup "$@" ;;

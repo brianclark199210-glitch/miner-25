@@ -220,6 +220,100 @@ def how_it_works():
     }
 
 
+def _b58encode(data: bytes) -> str:
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    number = int.from_bytes(data, "big")
+    chars: list[str] = []
+    while number:
+        number, remainder = divmod(number, 58)
+        chars.append(alphabet[remainder])
+    pad = 0
+    for byte in data:
+        if byte == 0:
+            pad += 1
+        else:
+            break
+    return ("1" * pad) + ("".join(reversed(chars)) or "1")
+
+
+def _ss58(pubkey: bytes, prefix: int = 42) -> str:
+    import hashlib
+
+    payload = bytes([prefix]) + pubkey
+    checksum = hashlib.blake2b(b"SS58PRE" + payload, digest_size=64).digest()[:2]
+    return _b58encode(payload + checksum)
+
+
+def _statement_from_message(text: str) -> dict | None:
+    if "\n" not in text:
+        return None
+    try:
+        value = json.loads(text.split("\n", 1)[1])
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _coldkey_from_env() -> str:
+    env = ROOT / ".env"
+    if not env.is_file():
+        return ""
+    for line in env.read_text().splitlines():
+        if line.startswith("COLDKEY_SS58="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def wallet_challenge_view() -> dict:
+    """Public payout-wallet challenge and the accepted consent. No seeds."""
+    now = int(time.time())
+    coldkey = _coldkey_from_env()
+    challenge: dict = {"present": False}
+    challenge_path = ROOT / ".secrets" / "wallet-challenge.txt"
+    if challenge_path.is_file():
+        text = challenge_path.read_text()
+        statement = _statement_from_message(text) or {}
+        expires = int(statement.get("expires_at") or 0)
+        boundary = statement.get("prospective") or {}
+        if not isinstance(boundary, dict):
+            boundary = {}
+        edge = boundary.get("boundary") or {}
+        if not isinstance(edge, dict):
+            edge = {}
+        challenge = {
+            "present": True,
+            "expired": bool(expires and expires <= now),
+            "from_epoch": statement.get("from_epoch"),
+            "through_epoch": statement.get("through_epoch"),
+            "generation": statement.get("generation"),
+            "issued_at": statement.get("issued_at"),
+            "expires_at": expires or None,
+            "boundary_epoch": edge.get("epoch"),
+            "message": text.strip("\n"),
+        }
+    accepted = None
+    history = STATE_DIR / ".provider.jwt.wallet-consent" / "history.json"
+    data = read_json_file(history) if history.is_file() else None
+    records = (data or {}).get("records") or []
+    if records:
+        record = records[-1]
+        message = ((record.get("original") or {}).get("message")) or ""
+        statement = _statement_from_message(message) or {}
+        raw_key = statement.get("coldkey")
+        ss58 = ""
+        if isinstance(raw_key, list) and len(raw_key) == 32 and all(isinstance(n, int) for n in raw_key):
+            ss58 = _ss58(bytes(raw_key))
+        accepted = {
+            "acknowledged": bool(record.get("acknowledged")),
+            "generation": statement.get("generation"),
+            "from_epoch": statement.get("from_epoch"),
+            "through_epoch": statement.get("through_epoch"),
+            "coldkey_ss58": ss58,
+            "matches_env": bool(ss58 and coldkey and ss58 == coldkey),
+        }
+    return {"coldkey_ss58": coldkey, "accepted": accepted, "challenge": challenge}
+
+
 def secrets_presence():
     secrets = ROOT / ".secrets"
     return {
@@ -248,6 +342,7 @@ def overview_payload():
         "pm2": pm2_apps(),
         "operators": operators_summary(),
         "secrets": secrets_presence(),
+        "wallet": wallet_challenge_view(),
         "how": how_it_works(),
         "project": project_map(),
         "commands": [
