@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UR Subnet · Miner Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="top">
+    <div class="brand">
+      <span class="mark">UR</span>
+      <div>
+        <p class="eyebrow">Bittensor SN25</p>
+        <h1>Miner &amp; project dashboard</h1>
+      </div>
+    </div>
+    <div class="top-meta">
+      <span id="clock">—</span>
+      <button type="button" id="refresh" class="btn">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-strip" id="health">
+      <div class="pulse-wrap">
+        <div id="pulse" class="pulse unknown" title="miner state"></div>
+        <div>
+          <p class="eyebrow">Live miner</p>
+          <h2 id="state-label">Loading…</h2>
+          <p id="state-sub" class="muted">Reading provider status</p>
+        </div>
+      </div>
+      <dl class="stat-grid" id="stat-grid"></dl>
+    </section>
+
+    <section class="split">
+      <article>
+        <h3>How mining works here</h3>
+        <ol class="flow" id="flow"></ol>
+        <div class="tiers" id="tiers"></div>
+      </article>
+      <article>
+        <h3>PM2 process</h3>
+        <div id="pm2" class="stack"></div>
+        <h3 class="later">Operators</h3>
+        <div id="operators" class="stack"></div>
+        <h3 class="later">Secrets on disk</h3>
+        <div id="secrets" class="stack"></div>
+      </article>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h3>Mechanism diagrams</h3>
+        <p class="muted">From <code>diagrams/readme/</code> — same figures as the README.</p>
+      </div>
+      <div class="diagram-tabs" id="diagram-tabs" role="tablist"></div>
+      <figure class="diagram-frame">
+        <img id="diagram-img" alt="Mechanism diagram" />
+        <figcaption id="diagram-cap" class="muted"></figcaption>
+      </figure>
+    </section>
+
+    <section class="split">
+      <article>
+        <h3>This repository</h3>
+        <ul class="repo-map" id="repo-map"></ul>
+      </article>
+      <article>
+        <h3>run.sh commands</h3>
+        <ul class="cmds" id="cmds"></ul>
+        <h3 class="later">Doctor</h3>
+        <pre id="doctor" class="doctor">Loading doctor…</pre>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <p>Local-only dashboard · does not expose seeds or JWTs · <code>./run.sh dashboard</code></p>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>

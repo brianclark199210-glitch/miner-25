@@ -6,8 +6,21 @@ cli/miner/miner
 cli/validator/validator
 cli/snclaim/snclaim
 
+# Local / prebuilt miner binaries (never commit)
+miner/provider
+miner/miner
+/provider
+
 evm/lib
 sim-testnet/runs/
 sim-testnet/build/
 /build/
 /validator/build/
+
+# Local secrets — never commit
+.secrets/
+*.seed
+message.key
+.env
+.env.*
+!.env.example
