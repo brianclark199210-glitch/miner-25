@@ -254,6 +254,61 @@ def _statement_from_message(text: str) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _as_bytes(value) -> bytes | None:
+    if not isinstance(value, list) or not value:
+        return None
+    if not all(isinstance(n, int) and 0 <= n <= 255 for n in value):
+        return None
+    return bytes(value)
+
+
+def _hex_short(raw: bytes | None) -> str | None:
+    if not raw:
+        return None
+    encoded = raw.hex()
+    if len(encoded) <= 16:
+        return encoded
+    return f"{encoded[:8]}…{encoded[-8:]}"
+
+
+def _uuid(raw: bytes | None) -> str | None:
+    if raw is None or len(raw) != 16:
+        return None
+    encoded = raw.hex()
+    return f"{encoded[0:8]}-{encoded[8:12]}-{encoded[12:16]}-{encoded[16:20]}-{encoded[20:32]}"
+
+
+def _statement_detail(statement: dict, now: int) -> dict:
+    """Public fields of a wallet statement. No nonce, signature, or seed."""
+    domain = statement.get("domain") if isinstance(statement.get("domain"), dict) else {}
+    prospective = statement.get("prospective") if isinstance(statement.get("prospective"), dict) else {}
+    edge = prospective.get("boundary") if isinstance(prospective.get("boundary"), dict) else {}
+    coldkey = _as_bytes(statement.get("coldkey"))
+    expires = int(statement.get("expires_at") or 0)
+    return {
+        "schema": statement.get("schema"),
+        "chain_id": domain.get("chain_id"),
+        "netuid": domain.get("netuid"),
+        "coordinator": domain.get("coordinator"),
+        "settlement_vault": domain.get("settlement_vault"),
+        "client_id": _uuid(_as_bytes(statement.get("client_id"))),
+        "network_id": _uuid(_as_bytes(statement.get("network_id"))),
+        "user_id": _uuid(_as_bytes(statement.get("user_id"))),
+        "coldkey_ss58": _ss58(coldkey) if coldkey and len(coldkey) == 32 else None,
+        "generation": statement.get("generation"),
+        "from_epoch": statement.get("from_epoch"),
+        "through_epoch": statement.get("through_epoch"),
+        "issued_at": statement.get("issued_at"),
+        "expires_at": expires or None,
+        "seconds_left": max(0, expires - now) if expires else None,
+        "expired": bool(expires and expires <= now),
+        "boundary_epoch": edge.get("epoch"),
+        "boundary_block": edge.get("block"),
+        "boundary_hash": _hex_short(_as_bytes(edge.get("hash"))),
+        "signer": prospective.get("signer"),
+    }
+
+
 def _coldkey_from_env() -> str:
     env = ROOT / ".env"
     if not env.is_file():
@@ -273,23 +328,19 @@ def wallet_challenge_view() -> dict:
     if challenge_path.is_file():
         text = challenge_path.read_text()
         statement = _statement_from_message(text) or {}
-        expires = int(statement.get("expires_at") or 0)
-        boundary = statement.get("prospective") or {}
-        if not isinstance(boundary, dict):
-            boundary = {}
-        edge = boundary.get("boundary") or {}
-        if not isinstance(edge, dict):
-            edge = {}
+        detail = _statement_detail(statement, now)
         challenge = {
             "present": True,
-            "expired": bool(expires and expires <= now),
-            "from_epoch": statement.get("from_epoch"),
-            "through_epoch": statement.get("through_epoch"),
-            "generation": statement.get("generation"),
-            "issued_at": statement.get("issued_at"),
-            "expires_at": expires or None,
-            "boundary_epoch": edge.get("epoch"),
+            "expired": detail["expired"],
+            "from_epoch": detail["from_epoch"],
+            "through_epoch": detail["through_epoch"],
+            "generation": detail["generation"],
+            "issued_at": detail["issued_at"],
+            "expires_at": detail["expires_at"],
+            "seconds_left": detail["seconds_left"],
+            "boundary_epoch": detail["boundary_epoch"],
             "message": text.strip("\n"),
+            "detail": detail,
         }
     accepted = None
     history = STATE_DIR / ".provider.jwt.wallet-consent" / "history.json"
@@ -303,13 +354,15 @@ def wallet_challenge_view() -> dict:
         ss58 = ""
         if isinstance(raw_key, list) and len(raw_key) == 32 and all(isinstance(n, int) for n in raw_key):
             ss58 = _ss58(bytes(raw_key))
+        detail = _statement_detail(statement, now)
         accepted = {
             "acknowledged": bool(record.get("acknowledged")),
-            "generation": statement.get("generation"),
-            "from_epoch": statement.get("from_epoch"),
-            "through_epoch": statement.get("through_epoch"),
-            "coldkey_ss58": ss58,
-            "matches_env": bool(ss58 and coldkey and ss58 == coldkey),
+            "generation": detail["generation"],
+            "from_epoch": detail["from_epoch"],
+            "through_epoch": detail["through_epoch"],
+            "coldkey_ss58": ss58 or detail["coldkey_ss58"] or "",
+            "matches_env": bool((ss58 or detail["coldkey_ss58"]) and coldkey and (ss58 or detail["coldkey_ss58"]) == coldkey),
+            "detail": detail,
         }
     return {"coldkey_ss58": coldkey, "accepted": accepted, "challenge": challenge}
 

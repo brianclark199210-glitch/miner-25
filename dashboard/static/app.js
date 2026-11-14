@@ -134,48 +134,189 @@ function fmtUnix(seconds) {
   return date.toLocaleString();
 }
 
+let countdownTimer = null;
+
+function dash(value) {
+  if (value == null || value === "") return "—";
+  return escapeHtml(value);
+}
+
+function detailCard(label, value) {
+  return `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`;
+}
+
+function epochSpan(detail) {
+  if (!detail) return "—";
+  return `${detail.from_epoch ?? "—"} → ${detail.through_epoch ?? "—"}`;
+}
+
+function statementFacts(detail) {
+  const d = detail || {};
+  return [
+    detailCard("Coldkey", `<code>${dash(d.coldkey_ss58)}</code>`),
+    detailCard("Generation", dash(d.generation)),
+    detailCard("Earning epochs", dash(epochSpan(d))),
+    detailCard("Issued", dash(fmtUnix(d.issued_at))),
+    detailCard("Expires", dash(fmtUnix(d.expires_at))),
+    detailCard("Netuid", dash(d.netuid)),
+    detailCard("Chain id", dash(d.chain_id)),
+    detailCard("Boundary epoch", dash(d.boundary_epoch)),
+    detailCard("Boundary block", dash(d.boundary_block)),
+    detailCard("Boundary hash", `<code>${dash(d.boundary_hash)}</code>`),
+    detailCard("Client", `<code>${dash(d.client_id)}</code>`),
+    detailCard("Network", `<code>${dash(d.network_id)}</code>`),
+    detailCard("User", `<code>${dash(d.user_id)}</code>`),
+    detailCard("Coordinator", `<code>${dash(d.coordinator)}</code>`),
+    detailCard("Settlement vault", `<code>${dash(d.settlement_vault)}</code>`),
+    detailCard("Boundary signer", `<code>${dash(d.signer)}</code>`),
+  ].join("");
+}
+
+function startCountdown(expiresAt, expired) {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  const el = document.getElementById("wallet-countdown");
+  if (!el) return;
+  const paint = (left) => {
+    if (left <= 0) {
+      el.textContent = "Expired";
+      el.className = "countdown expired";
+      return;
+    }
+    const m = Math.floor(left / 60);
+    const s = left % 60;
+    el.textContent = `${m}m ${String(s).padStart(2, "0")}s`;
+    el.className = "countdown open";
+  };
+  if (!expiresAt || expired) {
+    paint(0);
+    return;
+  }
+  const tick = () => paint(Math.floor(Number(expiresAt) - Date.now() / 1000));
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
 function renderWallet(wallet) {
   const el = document.getElementById("wallet");
   const note = document.getElementById("wallet-note");
-  const message = document.getElementById("wallet-message");
   const accepted = (wallet && wallet.accepted) || null;
   const challenge = (wallet && wallet.challenge) || {};
-  const parts = [
-    row("Coldkey", `<code>${escapeHtml((wallet && wallet.coldkey_ss58) || "—")}</code>`),
-  ];
-  if (accepted) {
-    const state = accepted.acknowledged ? badge("accepted", "ok") : badge("pending", "warn");
-    parts.push(row("Consent", state));
-    parts.push(row("Generation", escapeHtml(accepted.generation ?? "—")));
-    parts.push(row("Earning epochs", escapeHtml(`${accepted.from_epoch ?? "—"} through ${accepted.through_epoch ?? "—"}`)));
-    parts.push(row("Matches .env", accepted.matches_env ? badge("yes", "ok") : badge("no", "warn")));
-  } else {
-    parts.push(row("Consent", badge("none on file", "neutral")));
+  const detail = challenge.detail || {};
+  const coldkey = (wallet && wallet.coldkey_ss58) || detail.coldkey_ss58 || "";
+  const open = Boolean(challenge.present && !challenge.expired);
+  const bannerClass = open ? "open" : challenge.present ? "expired" : "missing";
+  let title = "No challenge on disk";
+  let summary = "Issue a statement, sign it with the payout coldkey, and submit it before it expires.";
+  if (open) {
+    title = "Open challenge";
+    summary = "Sign this exact statement with the coldkey and submit it before the timer ends.";
+  } else if (challenge.present && accepted && accepted.acknowledged) {
+    title = "Saved challenge expired";
+    summary = "The payout wallet is already accepted. This statement can no longer be submitted.";
+  } else if (challenge.present) {
+    title = "Saved challenge expired";
+    summary = "Issue a new statement. This one can no longer be submitted.";
+  } else if (accepted && accepted.acknowledged) {
+    title = "Payout wallet accepted";
+    summary = "No open challenge. A new one is only needed to change the payout coldkey or the epoch window.";
   }
-  if (challenge.present) {
-    parts.push(row("Saved challenge", challenge.expired ? badge("expired", "bad") : badge("open", "ok")));
-    parts.push(row("Challenge epochs", escapeHtml(`${challenge.from_epoch ?? "—"} through ${challenge.through_epoch ?? "—"}`)));
-    parts.push(row("Boundary epoch", escapeHtml(challenge.boundary_epoch ?? "—")));
-    parts.push(row("Issued", escapeHtml(fmtUnix(challenge.issued_at))));
-    parts.push(row("Expires", escapeHtml(fmtUnix(challenge.expires_at))));
-    message.hidden = false;
-    message.textContent = challenge.message || "";
-  } else {
-    parts.push(row("Saved challenge", badge("missing", "neutral")));
-    message.hidden = true;
-    message.textContent = "";
-  }
-  el.innerHTML = parts.join("");
-  if (accepted && accepted.acknowledged && challenge.expired) {
-    note.textContent = "This coldkey is already confirmed for the epochs above. The saved challenge has expired, so it cannot be submitted again.";
-  } else if (challenge.present && !challenge.expired) {
-    note.textContent = "Sign this exact message with the coldkey and submit it within five minutes of issue.";
-  } else if (!challenge.present) {
-    note.textContent = "No wallet challenge file is on disk. Run provider wallet challenge to print a new one.";
-  } else {
-    note.textContent = "The payout-wallet statement to sign, and the consent already on file.";
-  }
+
+  const steps = open
+    ? [
+        "Copy the statement below. Keep every character, including the line break.",
+        "Sign it with the payout coldkey in the substrate signing context.",
+        "Submit the signature before the timer hits zero.",
+      ]
+    : [
+        `Issue a new statement: provider wallet challenge ${coldkey || "<coldkey_ss58>"}`,
+        "Sign that new statement with the payout coldkey. Do not reuse an expired one.",
+        "Submit with provider wallet set within five minutes of issue.",
+      ];
+
+  const consent = accepted
+    ? `${accepted.acknowledged ? "Accepted" : "Pending"} · epochs ${epochSpan(accepted.detail || accepted)} · generation ${accepted.generation ?? "—"}`
+    : "No consent on file";
+  const match = accepted
+    ? accepted.matches_env
+      ? badge("matches .env", "ok")
+      : badge("differs from .env", "warn")
+    : badge("unset", "neutral");
+
+  el.innerHTML = `
+    <div class="wallet-banner ${bannerClass}">
+      <div>
+        <p class="eyebrow">${open ? "Sign now" : "Payout wallet"}</p>
+        <h2>${escapeHtml(title)}</h2>
+        <p class="muted">${escapeHtml(summary)}</p>
+      </div>
+      <div class="countdown-wrap">
+        <p class="eyebrow">Time left</p>
+        <p id="wallet-countdown" class="countdown">${open ? "—" : "Expired"}</p>
+      </div>
+    </div>
+    <div class="wallet-columns">
+      <div>
+        <h3 class="later first">Statement</h3>
+        <dl class="detail-grid">${challenge.present ? statementFacts(detail) : statementFacts(accepted && accepted.detail)}</dl>
+      </div>
+      <div>
+        <h3 class="later first">How to use it</h3>
+        <ol class="sign-steps">${steps.map((step) => `<li><span>${escapeHtml(step)}</span></li>`).join("")}</ol>
+        <div class="stack consent-stack">
+          ${row("Consent", accepted && accepted.acknowledged ? badge("accepted", "ok") : accepted ? badge("pending", "warn") : badge("none", "neutral"))}
+          ${row("On file", escapeHtml(consent))}
+          ${row("Coldkey check", match)}
+          ${row(".env coldkey", `<code>${dash(coldkey)}</code>`)}
+        </div>
+      </div>
+    </div>
+    <div class="message-block">
+      <div class="message-bar">
+        <span class="k">Exact statement</span>
+        <button type="button" class="btn" data-copy ${challenge.present ? "" : "disabled"}>Copy statement</button>
+      </div>
+      <pre id="wallet-message" class="doctor wallet-message">${challenge.present ? escapeHtml(challenge.message || "") : "No statement is saved. Issue a new wallet challenge to print one."}</pre>
+    </div>`;
+
+  if (open) note.textContent = "Sign this exact message with the coldkey and submit it within five minutes of issue.";
+  else if (accepted && accepted.acknowledged && challenge.expired) note.textContent = "This coldkey is already confirmed. The saved challenge has expired, so it cannot be submitted again.";
+  else if (!challenge.present) note.textContent = "No wallet challenge file is on disk. Run provider wallet challenge to print a new one.";
+  else note.textContent = "The payout-wallet statement to sign, and the consent already on file.";
+
+  startCountdown(challenge.expires_at, !open);
 }
+
+document.getElementById("wallet").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy]");
+  if (!button || button.disabled) return;
+  const text = document.getElementById("wallet-message")?.textContent || "";
+  const original = button.textContent;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (!ok) throw new Error("copy failed");
+    }
+    button.textContent = "Copied";
+  } catch {
+    button.textContent = "Select the statement";
+  }
+  setTimeout(() => {
+    button.textContent = original;
+  }, 1600);
+});
 
 function renderSecrets(sec) {
   const el = document.getElementById("secrets");

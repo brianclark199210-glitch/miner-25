@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=4" />
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -38,13 +38,12 @@
       <dl class="stat-grid" id="stat-grid"></dl>
     </section>
 
-    <section>
+    <section class="wallet-panel" aria-labelledby="wallet-heading">
       <div class="section-head">
-        <h3>New wallet challenge</h3>
+        <h3 id="wallet-heading">Wallet challenge</h3>
         <p class="muted" id="wallet-note">The payout-wallet statement to sign, and the consent already on file.</p>
       </div>
-      <div id="wallet" class="stack"></div>
-      <pre id="wallet-message" class="doctor wallet-message" hidden></pre>
+      <div id="wallet" class="wallet-layout"></div>
     </section>
 
     <section class="split">
