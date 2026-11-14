@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -364,7 +365,147 @@ def wallet_challenge_view() -> dict:
             "matches_env": bool((ss58 or detail["coldkey_ss58"]) and coldkey and (ss58 or detail["coldkey_ss58"]) == coldkey),
             "detail": detail,
         }
-    return {"coldkey_ss58": coldkey, "accepted": accepted, "challenge": challenge}
+    return {"coldkey_ss58": coldkey, "accepted": accepted, "challenge": challenge, "history": _record_wallet_status(coldkey, challenge, accepted)}
+
+
+def _status_db():
+    path = ROOT / ".secrets" / "wallet-status.sqlite"
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wallet_challenge_status (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            coldkey_ss58 TEXT,
+            generation INTEGER,
+            from_epoch INTEGER,
+            through_epoch INTEGER,
+            issued_at INTEGER,
+            expires_at INTEGER,
+            boundary_epoch INTEGER,
+            client_id TEXT,
+            netuid INTEGER,
+            matches_env INTEGER,
+            acknowledged INTEGER,
+            updated_at TEXT NOT NULL,
+            UNIQUE (kind, issued_at, generation, from_epoch, through_epoch)
+        )
+        """
+    )
+    return conn
+
+
+def _save_status(conn, row: dict) -> None:
+    if row.get("issued_at") is None:
+        return
+    conn.execute(
+        """
+        INSERT INTO wallet_challenge_status (
+            kind, status, coldkey_ss58, generation, from_epoch, through_epoch,
+            issued_at, expires_at, boundary_epoch, client_id, netuid,
+            matches_env, acknowledged, updated_at
+        ) VALUES (
+            :kind, :status, :coldkey_ss58, :generation, :from_epoch, :through_epoch,
+            :issued_at, :expires_at, :boundary_epoch, :client_id, :netuid,
+            :matches_env, :acknowledged, :updated_at
+        )
+        ON CONFLICT(kind, issued_at, generation, from_epoch, through_epoch) DO UPDATE SET
+            status = excluded.status,
+            expires_at = excluded.expires_at,
+            matches_env = excluded.matches_env,
+            acknowledged = excluded.acknowledged,
+            coldkey_ss58 = excluded.coldkey_ss58,
+            updated_at = excluded.updated_at
+        """,
+        row,
+    )
+
+
+def _record_wallet_status(coldkey: str, challenge: dict, accepted: dict | None) -> list[dict]:
+    """Persist public challenge and consent status. No statement, seed, or signature."""
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        conn = _status_db()
+    except sqlite3.Error:
+        return []
+    try:
+        detail = (challenge or {}).get("detail") or {}
+        if challenge.get("present"):
+            same = bool(detail.get("coldkey_ss58") and coldkey and detail.get("coldkey_ss58") == coldkey)
+            accepted_detail = (accepted or {}).get("detail") or {}
+            signed = bool(
+                accepted
+                and accepted.get("acknowledged")
+                and detail.get("issued_at") == accepted_detail.get("issued_at")
+                and detail.get("generation") == accepted.get("generation")
+                and detail.get("from_epoch") == accepted.get("from_epoch")
+                and detail.get("through_epoch") == accepted.get("through_epoch")
+            )
+            if signed:
+                challenge_status = "signed"
+            elif challenge.get("expired"):
+                challenge_status = "expired"
+            else:
+                challenge_status = "open"
+            _save_status(
+                conn,
+                {
+                    "kind": "challenge",
+                    "status": challenge_status,
+                    "coldkey_ss58": detail.get("coldkey_ss58") or coldkey or None,
+                    "generation": detail.get("generation"),
+                    "from_epoch": detail.get("from_epoch"),
+                    "through_epoch": detail.get("through_epoch"),
+                    "issued_at": detail.get("issued_at"),
+                    "expires_at": detail.get("expires_at"),
+                    "boundary_epoch": detail.get("boundary_epoch"),
+                    "client_id": detail.get("client_id"),
+                    "netuid": detail.get("netuid"),
+                    "matches_env": 1 if same else 0,
+                    "acknowledged": 1 if signed else 0,
+                    "updated_at": now,
+                },
+            )
+        if accepted:
+            detail = accepted.get("detail") or {}
+            _save_status(
+                conn,
+                {
+                    "kind": "consent",
+                    "status": "accepted" if accepted.get("acknowledged") else "pending",
+                    "coldkey_ss58": accepted.get("coldkey_ss58") or detail.get("coldkey_ss58") or None,
+                    "generation": accepted.get("generation"),
+                    "from_epoch": accepted.get("from_epoch"),
+                    "through_epoch": accepted.get("through_epoch"),
+                    "issued_at": detail.get("issued_at"),
+                    "expires_at": detail.get("expires_at"),
+                    "boundary_epoch": detail.get("boundary_epoch"),
+                    "client_id": detail.get("client_id"),
+                    "netuid": detail.get("netuid"),
+                    "matches_env": 1 if accepted.get("matches_env") else 0,
+                    "acknowledged": 1 if accepted.get("acknowledged") else 0,
+                    "updated_at": now,
+                },
+            )
+        conn.commit()
+        rows = conn.execute(
+            """
+            SELECT kind, status, coldkey_ss58, generation, from_epoch, through_epoch,
+                   issued_at, expires_at, boundary_epoch, client_id, netuid,
+                   matches_env, acknowledged, updated_at
+            FROM wallet_challenge_status
+            ORDER BY issued_at DESC, id DESC
+            LIMIT 20
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
 
 
 def secrets_presence():

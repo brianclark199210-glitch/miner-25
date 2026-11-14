@@ -172,6 +172,25 @@ function statementFacts(detail) {
   ].join("");
 }
 
+function historyTable(rows) {
+  if (!rows.length) {
+    return `<p class="muted">No challenge status has been saved yet.</p>`;
+  }
+  const body = rows.map((row) => `<tr>
+    <td>${escapeHtml(row.kind || "—")}</td>
+    <td>${badge(row.status || "—", row.status === "accepted" || row.status === "open" || row.status === "signed" ? "ok" : row.status === "expired" ? "bad" : "warn")}</td>
+    <td>${escapeHtml(row.generation ?? "—")}</td>
+    <td>${escapeHtml(`${row.from_epoch ?? "—"} → ${row.through_epoch ?? "—"}`)}</td>
+    <td>${escapeHtml(fmtUnix(row.issued_at))}</td>
+    <td>${escapeHtml(fmtUnix(row.expires_at))}</td>
+    <td>${row.matches_env ? badge("yes", "ok") : badge("no", "warn")}</td>
+  </tr>`).join("");
+  return `<table class="status-table">
+    <thead><tr><th>Kind</th><th>Status</th><th>Gen</th><th>Epochs</th><th>Issued</th><th>Expires</th><th>.env</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
 function startCountdown(expiresAt, expired) {
   if (countdownTimer) {
     clearInterval(countdownTimer);
@@ -205,18 +224,19 @@ function renderWallet(wallet) {
   if (!el || !note) return;
   const accepted = (wallet && wallet.accepted) || null;
   const challenge = (wallet && wallet.challenge) || {};
-  const detail = challenge.detail || {};
+  const detail = challenge.detail || (accepted && accepted.detail) || {};
   const coldkey = (wallet && wallet.coldkey_ss58) || detail.coldkey_ss58 || "";
   const open = Boolean(challenge.present && !challenge.expired);
-  const bannerClass = open ? "open" : challenge.present ? "expired" : "missing";
+  const settled = Boolean(accepted && accepted.acknowledged && accepted.matches_env && !open);
+  const bannerClass = open ? "open" : settled ? "accepted" : challenge.present ? "expired" : "missing";
   let title = "No challenge on disk";
   let summary = "Issue a statement, sign it with the payout coldkey, and submit it before it expires.";
   if (open) {
     title = "Open challenge";
     summary = "Sign this exact statement with the coldkey and submit it before the timer ends.";
-  } else if (challenge.present && accepted && accepted.acknowledged) {
-    title = "Saved challenge expired";
-    summary = "The payout wallet is already accepted. This statement can no longer be submitted.";
+  } else if (settled) {
+    title = "Payout wallet accepted";
+    summary = `This coldkey is confirmed for epochs ${epochSpan(accepted)}. The five-minute signing window closed after the signature was accepted.`;
   } else if (challenge.present) {
     title = "Saved challenge expired";
     summary = "Issue a new statement. This one can no longer be submitted.";
@@ -231,11 +251,17 @@ function renderWallet(wallet) {
         "Sign it with the payout coldkey in the substrate signing context.",
         "Submit the signature before the timer hits zero.",
       ]
-    : [
-        `Issue a new statement: provider wallet challenge ${coldkey || "<coldkey_ss58>"}`,
-        "Sign that new statement with the payout coldkey. Do not reuse an expired one.",
-        "Submit with provider wallet set within five minutes of issue.",
-      ];
+    : settled
+      ? [
+          `Accepted for epochs ${epochSpan(accepted)}, generation ${accepted.generation ?? "—"}.`,
+          "That consent stays in force through the last epoch. It does not need another signature.",
+          "Issue a new challenge only to change the payout coldkey or the epoch window.",
+        ]
+      : [
+          `Issue a new statement: provider wallet challenge ${coldkey || "<coldkey_ss58>"}`,
+          "Sign that new statement with the payout coldkey. Do not reuse an expired one.",
+          "Submit with provider wallet set within five minutes of issue.",
+        ];
 
   const consent = accepted
     ? `${accepted.acknowledged ? "Accepted" : "Pending"} · epochs ${epochSpan(accepted.detail || accepted)} · generation ${accepted.generation ?? "—"}`
@@ -254,8 +280,8 @@ function renderWallet(wallet) {
         <p class="muted">${escapeHtml(summary)}</p>
       </div>
       <div class="countdown-wrap">
-        <p class="eyebrow">Time left</p>
-        <p id="wallet-countdown" class="countdown">${open ? "—" : "Expired"}</p>
+        <p class="eyebrow">${open ? "Time left" : "Signing window"}</p>
+        <p id="wallet-countdown" class="countdown ${open ? "open" : settled ? "accepted" : "expired"}">${open ? "—" : settled ? "Accepted" : challenge.present ? "Expired" : "—"}</p>
       </div>
     </div>
     <div class="wallet-columns">
@@ -280,14 +306,18 @@ function renderWallet(wallet) {
         <button type="button" class="btn" data-copy ${challenge.present ? "" : "disabled"}>Copy statement</button>
       </div>
       <pre id="wallet-message" class="doctor wallet-message">${challenge.present ? escapeHtml(challenge.message || "") : "No statement is saved. Issue a new wallet challenge to print one."}</pre>
+    </div>
+    <div>
+      <h3 class="later">Saved status</h3>
+      <div class="status-wrap">${historyTable((wallet && wallet.history) || [])}</div>
     </div>`;
 
   if (open) note.textContent = "Sign this exact message with the coldkey and submit it within five minutes of issue.";
-  else if (accepted && accepted.acknowledged && challenge.expired) note.textContent = "This coldkey is already confirmed. The saved challenge has expired, so it cannot be submitted again.";
+  else if (settled) note.textContent = "The payout wallet is already confirmed. The saved file is the statement that was signed; its five-minute window is closed, which is required before an epoch can pay it.";
   else if (!challenge.present) note.textContent = "No wallet challenge file is on disk. Run provider wallet challenge to print a new one.";
-  else note.textContent = "The payout-wallet statement to sign, and the consent already on file.";
+  else note.textContent = "This statement can no longer be submitted. Issue a new wallet challenge if this coldkey still needs to be confirmed.";
 
-  startCountdown(challenge.expires_at, !open);
+  if (open) startCountdown(challenge.expires_at, false);
 }
 
 document.getElementById("wallet").addEventListener("click", async (event) => {

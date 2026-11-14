@@ -218,7 +218,7 @@ stop_installer() {
   if [[ -f "$HOME/.config/systemd/user/urnetwork.service" ]]; then
     if installer_active || systemctl --user is-enabled --quiet urnetwork.service 2>/dev/null; then
       log "stopping installer urnetwork.service (credential must have one owner)"
-      systemctl --user stop urnetwork.service 2>/dev/null || true
+      systemctl --user disable --now urnetwork.service 2>/dev/null || systemctl --user stop urnetwork.service 2>/dev/null || true
     fi
   fi
   # Also stop any stray provide that still holds the status file.
@@ -286,20 +286,18 @@ pm2_ensure() {
     return 0
   fi
 
-  # Another owner already mining — double-start must not fight it.
-  if miner_already_running; then
-    show_running
-    return 0
-  fi
-
+  # Takeover is the point of PM2 mode: the installer or a stray provide must
+  # not make start a no-op, or this process never becomes the owner.
   if [[ "$SN25_TAKEOVER" == "1" ]]; then
     stop_installer
-    # Drop the other PM2 mode so only one owner remains.
     if [[ "$name" == "$PM2_NAME" ]]; then
       pm2_delete_quiet "$PM2_NAME_ALL"
     else
       pm2_delete_quiet "$PM2_NAME"
     fi
+  elif miner_already_running; then
+    show_running
+    return 0
   fi
 
   # Stale stopped entry with same name.
@@ -356,8 +354,13 @@ cmd_all() {
 }
 
 cmd_default() {
-  # Prefer keeping whatever is already healthy.
-  if miner_already_running; then
+  # A live PM2 app is the owner. Otherwise start one, taking the credential
+  # from the installer when SN25_TAKEOVER=1.
+  if pm2_online "$PM2_NAME" || pm2_online "$PM2_NAME_ALL"; then
+    show_running
+    return 0
+  fi
+  if [[ "$SN25_TAKEOVER" != "1" ]] && miner_already_running; then
     show_running
     return 0
   fi

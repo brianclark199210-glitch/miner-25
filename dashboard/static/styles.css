@@ -228,7 +228,8 @@ main {
 .wallet-banner > div { min-width: 0; flex: 1 1 14rem; }
 .wallet-banner h2 { font-size: clamp(1.25rem, 2.2vw, 1.55rem); }
 .wallet-banner .muted { margin: 0.35rem 0 0; max-width: 42rem; }
-.wallet-banner.open { border-color: #8fbfa4; background: #f3faf6; }
+.wallet-banner.open,
+.wallet-banner.accepted { border-color: #8fbfa4; background: #f3faf6; }
 .wallet-banner.expired { border-color: #e2b2ab; background: #fbf6f5; }
 .countdown-wrap { min-width: 7.5rem; }
 .countdown {
@@ -238,7 +239,8 @@ main {
   font-weight: 500;
   line-height: 1.1;
 }
-.countdown.open { color: var(--ok); }
+.countdown.open,
+.countdown.accepted { color: var(--ok); }
 .countdown.expired { color: var(--bad); }
 .wallet-columns {
   display: grid;
@@ -310,6 +312,40 @@ h3.later.first { margin-top: 0; }
   margin-bottom: 0.45rem;
 }
 .message-bar .btn:disabled { opacity: 0.55; cursor: default; }
+
+.status-wrap { overflow-x: auto; max-width: 100%; }
+.status-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.status-table th, .status-table td {
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid rgba(197, 212, 200, 0.8);
+  white-space: nowrap;
+}
+.status-table th {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.status-wrap { overflow-x: auto; max-width: 100%; }
+.status-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.status-table th, .status-table td {
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid rgba(197, 212, 200, 0.8);
+  white-space: nowrap;
+}
+.status-table th {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
 
 .diagram-tabs {
   display: flex;
