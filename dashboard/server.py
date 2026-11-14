@@ -108,7 +108,7 @@ def pm2_apps():
     rows = []
     for a in apps:
         name = a.get("name") or ""
-        if name not in wanted and "sn25" not in name:
+        if name not in wanted:
             continue
         env = a.get("pm2_env") or {}
         started = env.get("pm_uptime")
@@ -428,6 +428,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(overview_payload())
         if path == "/api/doctor":
             return self._json({"text": provider_doctor_text(find_provider())})
+        if path in ("/app.js", "/styles.css"):
+            target = STATIC / path.lstrip("/")
+            kind = "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8"
+            return self._file(target, kind)
         if path.startswith("/diagrams/"):
             name = path[len("/diagrams/") :]
             if "/" in name or name.startswith(".") or not name.endswith(".svg"):
@@ -457,6 +461,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

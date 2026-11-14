@@ -202,6 +202,7 @@ function startCountdown(expiresAt, expired) {
 function renderWallet(wallet) {
   const el = document.getElementById("wallet");
   const note = document.getElementById("wallet-note");
+  if (!el || !note) return;
   const accepted = (wallet && wallet.accepted) || null;
   const challenge = (wallet && wallet.challenge) || {};
   const detail = challenge.detail || {};
@@ -375,26 +376,42 @@ async function loadDoctor() {
   }
 }
 
+function renderStep(name, fn) {
+  try {
+    fn();
+  } catch (err) {
+    const wallet = name === "wallet" ? document.getElementById("wallet") : null;
+    if (wallet) {
+      wallet.textContent = `${name} failed: ${err}`;
+    }
+  }
+}
+
 async function refresh() {
   const clock = document.getElementById("clock");
+  let data;
   try {
-    const data = await fetchJson("/api/overview");
-    clock.textContent = new Date(data.generated_at).toLocaleString();
-    renderHealth(data);
-    renderFlow(data.how || {});
-    renderPm2(data.pm2 || []);
-    renderOperators(data.operators || {});
-    renderSecrets(data.secrets || {});
-    renderWallet(data.wallet || {});
-    renderRepo(data.project || []);
-    renderCmds(data.commands || []);
-    renderDiagrams(data.diagrams || []);
+    data = await fetchJson("/api/overview");
   } catch (err) {
-    clock.textContent = "error";
-    document.getElementById("state-label").textContent = "dashboard error";
-    document.getElementById("state-sub").textContent = String(err);
-    document.getElementById("pulse").className = "pulse bad";
+    if (clock) clock.textContent = "error";
+    const label = document.getElementById("state-label");
+    const sub = document.getElementById("state-sub");
+    if (label) label.textContent = "dashboard error";
+    if (sub) sub.textContent = String(err);
+    const pulse = document.getElementById("pulse");
+    if (pulse) pulse.className = "pulse bad";
+    return;
   }
+  if (clock) clock.textContent = new Date(data.generated_at).toLocaleString();
+  renderStep("health", () => renderHealth(data));
+  renderStep("flow", () => renderFlow(data.how || {}));
+  renderStep("pm2", () => renderPm2(data.pm2 || []));
+  renderStep("operators", () => renderOperators(data.operators || {}));
+  renderStep("secrets", () => renderSecrets(data.secrets || {}));
+  renderStep("wallet", () => renderWallet(data.wallet || {}));
+  renderStep("repo", () => renderRepo(data.project || []));
+  renderStep("commands", () => renderCmds(data.commands || []));
+  renderStep("diagrams", () => renderDiagrams(data.diagrams || []));
 }
 
 document.getElementById("refresh").addEventListener("click", () => {
